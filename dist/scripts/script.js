@@ -1,0 +1,454 @@
+(function (window) {
+	'use strict';
+
+	// Get element(s) by CSS selector:
+	window.qs = function (selector, scope) {
+		return (scope || document).querySelector(selector);
+	};
+	window.qsa = function (selector, scope) {
+		return (scope || document).querySelectorAll(selector);
+	};
+
+	// addEventListener wrapper:
+	window.$on = function (target, type, callback, useCapture) {
+		target.addEventListener(type, callback, !!useCapture);
+	};
+
+	// Register events on elements that may or may not exist yet:
+	// $live('div a', 'click', function (event) {});
+	window.$live = (function () {
+		var eventRegistry = {};
+
+		function dispatchEvent(event) {
+			var targetElement = event.target;
+
+			eventRegistry[event.type].forEach(function (entry) {
+				var potentialElements = window.qsa(entry.selector);
+				var hasMatch = Array.prototype.indexOf.call(potentialElements, targetElement) >= 0;
+
+				if (hasMatch) {
+					entry.handler.call(targetElement, event);
+				}
+			});
+		}
+
+		return function (selector, event, handler) {
+			if (!eventRegistry[event]) {
+				eventRegistry[event] = [];
+				window.$on(document.documentElement, event, dispatchEvent, true);
+			}
+
+			eventRegistry[event].push({
+				selector: selector,
+				handler: handler
+			});
+		};
+	}());
+
+	// Find the element's parent with the given tag name:
+	// $parent(qs('a'), 'div');
+	window.$parent = function (element, tagName) {
+		if (!element.parentNode) {
+			return;
+		}
+		if (element.parentNode.tagName.toLowerCase() === tagName.toLowerCase()) {
+			return element.parentNode;
+		}
+		return window.$parent(element.parentNode, tagName);
+	};
+
+	window.ready = function (fn) {
+		if (document.readyState != 'loading'){
+			fn();
+		} else {
+			document.addEventListener('DOMContentLoaded', fn);
+		}
+	};
+
+/**
+ * Fire an event handler to the specified node. Event handlers can detect that the event was fired programatically
+ * by testing for a 'synthetic=true' property on the event object
+ * @param {HTMLNode} node The node to fire the event handler on.
+ * @param {String} eventName The name of the event without the "on" (e.g., "focus")
+ */
+window.fireEvent = function (node, eventName) {
+    // Make sure we use the ownerDocument from the provided node to avoid cross-window problems
+    var doc;
+    if (node.ownerDocument) {
+        doc = node.ownerDocument;
+    } else if (node.nodeType == 9){
+        // the node may be the document itself, nodeType 9 = DOCUMENT_NODE
+        doc = node;
+    } else {
+        throw new Error("Invalid node passed to fireEvent: " + node.id);
+    }
+
+     if (node.dispatchEvent) {
+        // Gecko-style approach (now the standard) takes more work
+        var eventClass = "";
+
+        // Different events have different event classes.
+        // If this switch statement can't map an eventName to an eventClass,
+        // the event firing is going to fail.
+        switch (eventName) {
+            case "click": // Dispatching of 'click' appears to not work correctly in Safari. Use 'mousedown' or 'mouseup' instead.
+            case "mousedown":
+            case "mouseup":
+                eventClass = "MouseEvents";
+                break;
+
+            case "focus":
+            case "change":
+            case "blur":
+            case "select":
+                eventClass = "HTMLEvents";
+                break;
+
+            default:
+                throw "fireEvent: Couldn't find an event class for event '" + eventName + "'.";
+                break;
+        }
+        var event = doc.createEvent(eventClass);
+
+        var bubbles = eventName == "change" ? false : true;
+        event.initEvent(eventName, bubbles, true); // All events created as bubbling and cancelable.
+
+        event.synthetic = true; // allow detection of synthetic events
+        node.dispatchEvent(event, true);
+    } else  if (node.fireEvent) {
+        // IE-old school style
+        var event = doc.createEventObject();
+        event.synthetic = true; // allow detection of synthetic events
+        node.fireEvent("on" + eventName, event);
+    }
+};
+
+	window.each = function (item, fn) {
+		if(Object.prototype.toString.call(item) === '[object Object]') {
+			for(var key in item) {
+				if (item.hasOwnProperty(key)) {
+					fn(key, item[key]);
+				}
+			}
+		} else if (Array.isArray(item)) {
+				item.forEach(function(val, key){
+					fn(key, val);
+				});
+		}
+	};
+
+
+	// Allow for looping on nodes by chaining:
+	// qsa('.foo').forEach(function () {})
+	NodeList.prototype.forEach = Array.prototype.forEach;
+
+	Element.prototype.setAttributes = function (attrs) {
+			for (var idx in attrs) {
+					if ((idx === 'styles' || idx === 'style') && typeof attrs[idx] === 'object') {
+							for (var prop in attrs[idx]){this.style[prop] = attrs[idx][prop];}
+					} else if (idx === 'html') {
+							this.innerHTML = attrs[idx];
+					} else {
+							this.setAttribute(idx, attrs[idx]);
+					}
+			}
+	};
+
+	Element.prototype.addClass = function (className) {
+		if (this.classList) {
+			this.classList.add(className);
+		}
+		else {
+			this.className += ' ' + className;
+		}
+	};
+
+})(window);
+'use strict';
+var appnextAPP = (function(){	
+
+	var q = parseURL(),
+			app;
+
+	var Viewport = function() {
+		var vp;
+		
+		function addViewport () {
+			vp         = document.createElement('meta');
+			vp.name    = "viewport";
+			vp.id      = "customViewportAppNext";
+			vp.content = "width=device-width, initial-scale=1";
+			document.getElementsByTagName('head')[0].appendChild(vp);
+		}
+
+		function removeViewport () {
+			vp.parentNode.removeChild(vp);
+		}
+
+		return {
+			add:    addViewport,
+			remove: removeViewport,
+		}
+	}();
+
+
+	function loadJSONP (url, callback, context) {
+		var unique = 0;
+		var name = "_jsonp_" + unique++;
+
+		if (url.match(/\?/)) url += "&callback="+name;
+		else url += "?callback="+name;
+
+		// Create script
+		var script  = document.createElement('script');
+		script.type = 'text/javascript';
+		script.src  = url;
+
+		// Setup handler
+		window[name] = function(data){
+			callback.call((context || window), data);
+			document.getElementsByTagName('head')[0].removeChild(script);
+			script = null;
+			delete window[name];
+		};
+
+		// Load JSON
+		document.getElementsByTagName('head')[0].appendChild(script);
+	}
+
+
+	function success_jsonp (data) {
+		Viewport.add();
+		render(data.apps);
+	}
+
+	function parseURL (url) {
+		var query = {};
+		var scriptTag = qs('#videoAppScript');
+
+		return query = {
+			id:                scriptTag.getAttribute('data-id') || "",
+			cnt:               scriptTag.getAttribute('data-count') || "20",
+			cat:               scriptTag.getAttribute('data-category') || "",
+			pbk:               scriptTag.getAttribute('data-postback') || "",
+			bcolor:            scriptTag.getAttribute('data-buttonColor') || "",
+			btext:             scriptTag.getAttribute('data-buttonText') || "Download",
+			skipText:          scriptTag.getAttribute('data-skipText') || "Skip",
+			showSkipTimeAfter: scriptTag.getAttribute('data-skipTimeAfter') || "1",
+			countdown:         scriptTag.getAttribute('data-contdown') || "5",
+		}
+	};
+
+	function getVideoApp (apps) {
+		for (var i = 0; i < apps.length; i++) {
+			if (apps[i].urlVideo) {
+				return apps[i];
+			};
+		};
+	}
+
+	function vdoFakeClick (a) {
+		if (document.createEvent) {
+			var b = document.createElement("a");
+			document.getElementsByTagName("body")[0].appendChild(b);
+			b.addEventListener("click", function(b) {
+				b.preventDefault();
+				a()
+			}, !1);
+			var evt = document.createEvent("MouseEvents");
+			evt.initMouseEvent && (evt.initMouseEvent("click", !0, !0, window, 0, 0, 0, 0, 0, !1, !1, !1, !1, 0, null), b.dispatchEvent(evt))
+		} else a()
+	};
+
+	function randomNumber (min, max) {
+		return Math.floor(Math.random() * (max - min) + min);
+	}
+
+	function numberWithCommas(x) {
+			return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+	}
+
+	function starRating (starsHover, starsHoverImage, defaultStarsImage, starsRating) {
+		starsHoverImage.style.width = defaultStarsImage.getBoundingClientRect().width + 'px';
+		starsHover.style.width      = (starsRating/5)*100 + "%";
+	};
+
+	function calculateAspectRatioFit(srcWidth, srcHeight, availableWidth, availableHeight) {
+		for (var i = availableWidth; i>0; i--)
+		{
+			var y = srcHeight*i/srcWidth;
+			if ( y == parseInt(y))
+			{
+				return { width: i, height: y };
+				break;
+			}				
+	 }
+	}
+	function render (apps) {
+		app = getVideoApp(apps);
+		// console.log(Object.prototype.toString.call(apps));
+		var iframe = createIframe();
+		iframe.onload = function() {
+			var i           = this.contentWindow.document,
+					iframe          = this,
+					title           = qs('.title', i),
+					description     = qs('.description', i),
+					video           = qs('#video-player', i),
+					sprite          = qs('.sprite-animation__video', i),
+					image           = qs('.small-image > img', i),
+					skipBlock       = qs('.skip-block', i),
+					skipLink        = qs('.skip-link', i),
+					downloadNumbers = qs('.rating-download-numbers', i),
+					stars           = qs('.stars', i),
+					appDOM          = qs('.app', i);
+
+			if (title) {
+				title.innerHTML = app.title;	
+			};
+			
+			if (description) {
+				description.innerHTML = app.desc;	
+			};
+			
+			if (stars) {
+				var starsHover        = qs('.stars__hover', i),
+						starsHoverImage   = qs('.stars__hover img', i),
+						defaultStarsImage = qs('.stars__default img', i),
+						starsRating       = Math.round((Math.random() * (5 - 3.5) + 3.5)*2)/2;
+	
+					starRating(starsHover, starsHoverImage, defaultStarsImage, starsRating);
+					window.addEventListener('resize', function(event){
+						starRating(starsHover, starsHoverImage, defaultStarsImage, starsRating);
+					});
+			};
+
+
+			if (downloadNumbers) {
+				downloadNumbers.innerHTML = randomNumber(10000, 2000000).toLocaleString();
+			};
+
+			if (sprite) {
+				var spriteContainer = qs('#sprite-animation', i),
+						placeholder  = qs('.sprite-animation__placeholder', i),
+						frameStep    = 0,
+						newSizes     = {},
+						spriteHeight = 0, 
+						resetSprite  = function() {
+							frameStep        = 0;
+							sprite.style.top = 0;
+						},
+						setupNewSizes = function() {
+							spriteContainer.style.width  = "auto";
+							spriteContainer.style.height = "auto";
+							resetSprite();
+							newSizes = calculateAspectRatioFit(placeholder.naturalWidth, placeholder.naturalHeight, placeholder.width, placeholder.height);
+							spriteContainer.style.width  = newSizes.width + "px";
+							spriteContainer.style.height = newSizes.height + "px";
+
+							spriteHeight = sprite.offsetHeight;							
+						};
+				setupNewSizes();
+				window.addEventListener('resize', function(event){
+					setupNewSizes();
+				});
+				var animateFun = setInterval(function() {
+						if (frameStep >= spriteHeight) {
+							resetSprite();
+						};
+						frameStep = frameStep + newSizes.height;						
+						sprite.style.top = '-'+frameStep+'px';
+					}, 60);
+			};
+
+			if (video) {
+				video.setAttribute('src', app.urlVideo);
+				// remove on production
+				// video.pause();
+				// uncomment on production 
+				// video.play();
+				vdoFakeClick(function() {
+					video.load();
+					video.play();
+				})
+			};
+
+			if (image) {
+				image.src = app.urlImg;
+				image.setAttribute('alt', app.title);				
+			};
+
+			appDOM.addEventListener('click', function() {
+				// uncomment on production
+				window.location = app.urlApp;
+			});
+
+			skipLink.addEventListener('click', function() {
+				iframe.parentNode.removeChild(iframe);
+				Viewport.remove();
+			});
+
+
+			setTimeout(function() {
+				skipBlock.style.display = "block";
+				runCoundown(i);
+			}, seconds(q.showSkipTimeAfter))
+		};
+	};
+
+
+	function runCoundown(iframe) {
+		var timer       = qs('.countdown', iframe);
+		var seconds     = q.countdown;
+		timer.innerHTML = seconds;
+		var countdowner = setInterval(function() {
+			seconds--;
+			timer.innerHTML = seconds;
+			if (seconds == 0) {
+				// uncomment on production
+				window.location = app.urlApp;
+				clearInterval(countdowner)
+			};
+		}, 1000)
+
+	};
+
+	function seconds (time) {
+		return time*1000;
+	}
+
+	function createIframe () {
+		var iframe = document.createElement('iframe');
+		
+		iframe.src = 'iframe.html';
+		iframe.id  = "videoIframe";
+		iframe.setAttributes({
+			styles: {
+				position:    'fixed',
+				top:         "0",
+				right:       "0",
+				bottom:      "0",
+				left:        "0",
+				borderStyle: 'none',
+				width:       '100%',
+				height:      '100%',
+			}
+		});
+		document.body.appendChild(iframe);
+		return iframe;
+	}
+
+	function init() {
+		if (!q.id) {
+			return
+		};
+		loadJSONP("https://admin.appnext.com/offerWallApi.aspx?&vs=1&id="+q.id+"&cnt="+q.cnt+"&cat="+q.cat, success_jsonp);
+	}
+
+	return {
+		init: init
+	}
+
+}());
+ready(function() {
+	appnextAPP.init();
+});
