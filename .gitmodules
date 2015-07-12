@@ -1,3 +1,3 @@
 [submodule "app"]
 	path = app
-	url = /Applications/MAMP/htdocs/VideoApp/www/app
+url=git@github.com:m-pokrovskii/VideoApp.submodule.git
